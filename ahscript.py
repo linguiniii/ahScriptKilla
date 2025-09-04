@@ -36,30 +36,26 @@ def get_auction_data():
         print(f"Error in get_auction_data: {e}")
         return []
 
-def check_auction_status(auction_data):
-    """Check the auction status and send notifications for sold auctions."""
+def check_bin_auction_status(auction_data):
+    """Check the auction status and send notifications for BIN auctions."""
     try:
         for auction in auction_data:
-            # Check if auction has ended (claimed or past end time)
-            current_time = int(time.time() * 1000)  # Convert to milliseconds
-            auction_ended = auction.get('claimed', False) or current_time > auction.get('end', float('inf'))
-            
-            if auction_ended:
+            # Check if auction has a BIN price (i.e., the auction is a BIN auction)
+            bin_price = auction.get('bin', None)  # BIN auctions have a price in `bin`
+            if bin_price:
                 item_name = auction.get('item_name', 'Unknown Item')
                 auction_id = auction['uuid']
-                price = auction.get('highest_bid_amount', auction.get('starting_bid', 0))
-
-                # Send notification for this sold auction
-                print(f"Auction for {item_name} (ID: {auction_id}) has been sold for {price} coins!")
-                send_discord_notification(item_name, auction_id, price)
+                # Send notification for BIN auction
+                print(f"Bidding detected for {item_name} (ID: {auction_id}) at BIN price: {bin_price} coins!")
+                send_discord_notification(item_name, auction_id, bin_price)
     except Exception as e:
-        print(f"Error in check_auction_status: {e}")
+        print(f"Error in check_bin_auction_status: {e}")
 
 def send_discord_notification(item_name, auction_id, price):
     """Send a notification to Discord using a webhook."""
     try:
         data = {
-            "content": f"**Auction Sold!**\nYour auction for **{item_name}** (ID: {auction_id}) has been sold for **{price}** coins!",
+            "content": f"**BIN Auction!**\nYour BIN auction for **{item_name}** (ID: {auction_id}) is now live with a **Buy It Now** price of **{price}** coins!",
         }
         response = requests.post(DISCORD_WEBHOOK_URL, json=data)
         if response.status_code == 204:
@@ -70,13 +66,13 @@ def send_discord_notification(item_name, auction_id, price):
         print(f"Error in send_discord_notification: {e}")
 
 def main():
-    """Main loop to check auction status periodically."""
-    print("Script has started...")  # Notify that the script has started
-    
-    # Send startup notification to Discord
+    """Main loop to check BIN auction status periodically."""
+    print("Script has started...")
+
+    # Notify that the script has started
     try:
         startup_data = {
-            "content": "🚀 **Auction Monitor Started!**\nYour Hypixel SkyBlock auction monitoring script is now running and will notify you of completed auctions."
+            "content": "🚀 **Auction Monitor Started!**\nYour Hypixel SkyBlock auction monitoring script is now running and will notify you of new BIN auctions."
         }
         response = requests.post(DISCORD_WEBHOOK_URL, json=startup_data)
         if response.status_code == 204:
@@ -85,7 +81,9 @@ def main():
             print(f"Error sending startup notification: {response.status_code}")
     except Exception as e:
         print(f"Error sending startup notification: {e}")
+
     seen_auctions = set()  # Keep track of auctions we've already processed
+
     try:
         while True:
             print("Checking auctions...")
@@ -96,17 +94,27 @@ def main():
                     # Only process auctions from your account
                     if auction.get('auctioneer') != PLAYER_UUID:
                         continue
-                    # Only process auctions that haven't been sold before
-                    # Check if auction has ended (claimed or past end time)
-                    current_time = int(time.time() * 1000)  # Convert to milliseconds
-                    auction_ended = auction.get('claimed', False) or current_time > auction.get('end', float('inf'))
-                    
-                    if auction_ended and auction_id not in seen_auctions:
+
+                    item_name = auction.get('item_name', 'Unknown Item')
+                    print(f"Found your auction: {item_name} (ID: {auction_id[:8]}...)")
+
+                    # Check for BIN auction and if we haven't seen it already
+                    if auction_id not in seen_auctions:
+                        check_bin_auction_status([auction])
                         seen_auctions.add(auction_id)
-                        check_auction_status([auction])
-            time.sleep(60)  # Wait 60 seconds before checking again
+
+            time.sleep(30)  # Wait 30 seconds before checking again (faster detection)
     except KeyboardInterrupt:
         print("\nScript has stopped.")  # Notify that the script has stopped
+        try:
+            stop_data = {
+                "content": "🛑 **Auction Monitor Stopped!**\nYour Hypixel SkyBlock auction monitoring script has been stopped."
+            }
+            response = requests.post(DISCORD_WEBHOOK_URL, json=stop_data)
+            if response.status_code == 204:
+                print("Stop notification sent to Discord successfully!")
+        except Exception as e:
+            print(f"Error sending stop notification: {e}")
         sys.exit(0)
     except Exception as e:
         print(f"Error in main: {e}")
